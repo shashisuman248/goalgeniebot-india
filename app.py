@@ -89,8 +89,9 @@ def whatsapp_reply():
         with open("static/goal_report.pdf", "wb") as f:
             f.write(pdf_buffer.read())
 
-        msg.body("✅ Here’s your mutual fund recommendation PDF:")
-        msg.media("https://goalgeniebot-india-1.onrender.com/static/goal_report.pdf")
+       funds_text = "\n".join([f"• {name} ({category})" for name, category in recommendations])
+msg.body(f"✅ Here’s your recommended funds:\n\n{funds_text}")
+
     else:
         msg.body(
             "👋 This is GoalGenieBot powered by Sip Wealth 🤖\n\n"
