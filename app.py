@@ -60,13 +60,20 @@ def static_files(filename):
 
 @app.route("/whatsapp/webhook", methods=["POST"])
 def whatsapp_reply():
+   @app.route("/whatsapp/webhook", methods=["POST"])
+def whatsapp_reply():
     incoming_msg = request.form.get('Body', '').lower()
+    print("📩 Incoming message:", incoming_msg)  # Debug line
+
     resp = MessagingResponse()
     msg = resp.message()
 
     parsed = parse_input(incoming_msg)
+    print("🔍 Parsed result:", parsed)  # Debug line
+
     if parsed:
         goal, tenure, sip, risk = parsed
+        print(f"✅ Parsed values: goal={goal}, tenure={tenure}, sip={sip}, risk={risk}")
         recommendations = get_fund_recommendations(risk)
         pdf_buffer = generate_pdf(goal, tenure, sip, risk, recommendations)
 
@@ -80,7 +87,7 @@ def whatsapp_reply():
         msg.body(
             "👋 This is GoalGenieBot powered by Sip Wealth 🤖\n\n"
             "Please enter your goal like this:\n\n"
-            "*goal: 1 crore*\n*tenure: 7 years*\n*sip: 60000*\n*risk: aggressive*"
+            "*goal: 10000000*\n*tenure: 7*\n*sip: 60000*\n*risk: aggressive*"
         )
 
     return str(resp)
