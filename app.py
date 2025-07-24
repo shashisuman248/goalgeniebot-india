@@ -1,23 +1,28 @@
-from flask import Flask, request
+from flask import Flask, request, send_file
 from twilio.twiml.messaging_response import MessagingResponse
 import math
+import os
 
 app = Flask(__name__)
 
 @app.route('/')
-def index():
-    return '✅ GoalGenieBot v2 is live with smart recommendations!'
+def home():
+    return '🚀 GoalGenieBot is live!'
 
+# 🔍 Parse input like: goal: 10000000\n tenure: 7\n sip: 60000\n risk: aggressive
 def parse_input(message):
     try:
+        print("🔍 Raw message:", message)
         lines = message.strip().lower().split('\n')
         data = {}
         for line in lines:
             if ':' in line:
                 key, value = line.split(':', 1)
                 data[key.strip()] = value.strip()
+        print("✅ Parsed data:", data)
         return int(data['goal']), int(data['tenure']), int(data['sip']), data['risk']
-    except:
+    except Exception as e:
+        print("❌ Error parsing input:", e)
         return None
 
 def future_value(sip, r, n):
@@ -75,30 +80,27 @@ def get_fund_mix(risk, tenure_category):
     
     return mix
 
-@app.route("/whatsapp/webhook", methods=["POST"])
-def whatsapp_reply():
-    incoming_msg = request.form.get('Body', '').lower()
-    print("📩 Incoming message:", incoming_msg)
+@app.route('/whatsapp/webhook', methods=['POST'])
+def whatsapp_webhook():
+    incoming_msg = request.form.get('Body', '')
+    print("📩 Incoming WhatsApp Message:", incoming_msg)
 
     resp = MessagingResponse()
     msg = resp.message()
 
     parsed = parse_input(incoming_msg)
-    print("🔍 Parsed input:", parsed)
 
     if parsed:
         goal, tenure, sip, risk = parsed
         tenure_cat = categorize_tenure(tenure)
         print(f"🎯 Goal: ₹{goal}, Tenure: {tenure_cat}, SIP: ₹{sip}, Risk: {risk}")
 
-        # Monthly rate based on risk
         rate_map = {'aggressive': 0.012, 'moderate': 0.009, 'conservative': 0.006}
         r = rate_map.get(risk, 0.009)
         months = tenure * 12
         fv = round(future_value(sip, r, months))
-        feasible = "Achievable ✅" if fv >= goal else f"Not Achievable ❌ (est. ₹{fv})"
+        feasible = "Achievable ✅" if fv >= goal else f"Not Achievable ❌ (est. ₹{fv:,})"
 
-        # Fund suggestions
         funds = get_fund_mix(risk, tenure_cat)
         fund_lines = '\n'.join([f"• {name} ({alloc})" for name, alloc in funds])
 
@@ -107,13 +109,13 @@ def whatsapp_reply():
             f"💸 SIP: ₹{sip:,}/month\n"
             f"📈 Risk: {risk.capitalize()}\n"
             f"🧮 Feasibility: {feasible}\n\n"
-            f"📊 Recommended Fund Allocation:\n{fund_lines}\n\n"
-            f"🔁 Tip: Review this yearly and consider SIP top-up."
+            f"📊 Recommended Funds:\n{fund_lines}\n\n"
+            f"📥 PDF with Sip Wealth logo coming soon!"
         )
     else:
         msg.body(
-            "👋 This is GoalGenieBot powered by Sip Wealth 🤖\n\n"
-            "Send your goal like this:\n\n"
+            "👋 *This is GoalGenieBot powered by Sip Wealth*\n\n"
+            "Send your goal in this format:\n\n"
             "*goal: 10000000*\n*tenure: 7*\n*sip: 60000*\n*risk: aggressive*"
         )
 
