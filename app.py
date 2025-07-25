@@ -1,93 +1,55 @@
-from flask import Flask, request, jsonify
-import pandas as pd
+from flask import Flask, request
+import json
 
 app = Flask(__name__)
 
-# Load the recommendation matrix
-matrix_path = 'data/recommendation_matrix.xlsx'
-df = pd.read_excel(matrix_path)
+@app.route('/')
+def index():
+    return "GoalGenieBot is live!"
 
-# Clean up column names for safety
-df.columns = [col.strip().lower() for col in df.columns]
-
-def match_fund(sip, tenure, risk):
-    # Filter by risk profile
-    filtered = df[df['risk'].str.lower() == risk.lower()]
-    if filtered.empty:
-        return None, "No match found for this risk profile."
-
-    # Try to match based on tenure and SIP ranges
-    matched = filtered[
-        (filtered['min_sip'] <= sip) &
-        (filtered['max_sip'] >= sip) &
-        (filtered['min_tenure'] <= tenure) &
-        (filtered['max_tenure'] >= tenure)
-    ]
-
-    if matched.empty:
-        return None, "No exact match found for your SIP and tenure range."
-
-    best_match = matched.iloc[0]
-    return best_match, None
-
+# Support both /webhook and /whatsapp/webhook
 @app.route("/webhook", methods=["POST"])
 @app.route("/whatsapp/webhook", methods=["POST"])
 def webhook():
-    # your code here
+    data = request.get_json()
+    print("Received data:", json.dumps(data, indent=2))
 
-def webhook():
-    if request.method == "GET":
-        return "GoalGenieBot is live!"
-
-    incoming_msg = request.json.get("Body", "").lower()
-    sender = request.json.get("From", "")
-
-    # Check if input format is correct
     try:
-        lines = incoming_msg.strip().split("\n")
-        user_data = {}
-        for line in lines:
-            if "goal" in line:
-                user_data["goal"] = int(line.split()[-1].replace("₹", "").replace(",", ""))
-            elif "tenure" in line:
-                user_data["tenure"] = int(line.split()[0])
-            elif "sip" in line:
-                user_data["sip"] = int(line.split()[-1].replace("₹", "").replace(",", ""))
-            elif "risk" in line:
-                user_data["risk"] = line.split()[-1].lower()
+        # Get user phone & message
+        phone = data["contacts"][0]["wa_id"]
+        user_message = data["messages"][0]["text"]["body"].strip().lower()
 
-        goal = user_data["goal"]
-        tenure = user_data["tenure"]
-        sip = user_data["sip"]
-        risk = user_data["risk"]
+        # Check if message contains goal info
+        if "goal" in user_message and "tenure" in user_message and "sip" in user_message:
+            reply = "📊 Thanks! Your SIP goal has been received. Recommendation logic coming soon."
+        else:
+            reply = "👋 This is GoalGenieBot powered by Sip Wealth.\nPlease send your goal like this:\n\n" \
+                    "`goal: 10000000`\n`tenure: 7`\n`sip: 60000`\n`risk: aggressive`"
 
-        # Fund matching
-        match, error = match_fund(sip, tenure, risk)
-
-        if error:
-            return jsonify({"message": f"Sorry! {error}"})
-
-        fund_name = match['fund']
-        logic = match['logic']
-        explanation = match['explanation']
-        hindi = match['hindi_explanation']
-
-        response = f"""📊 *Fund Recommendation*\n
-✅ *{fund_name}*\n
-🧠 *Logic:* {logic}\n
-📘 *Explanation:* {explanation}\n
-🗣️ *हिंदी में:* {hindi}
-        """
+        send_whatsapp_reply(phone, reply)
 
     except Exception as e:
-        response = ("⚠️ Error parsing input.\n"
-                    "Please send your details like this:\n"
-                    "`goal 10000000`\n"
-                    "`tenure 7 years`\n"
-                    "`sip 60000`\n"
-                    "`risk aggressive`")
+        print("Error:", str(e))
 
-    return jsonify({"message": response})
+    return "OK", 200
 
-if __name__ == "__main__":
-    app.run(debug=True)
+def send_whatsapp_reply(to, message):
+    from twilio.rest import Client
+
+    # Replace with your Twilio credentials
+    ACCOUNT_SID = "your_account_sid"
+    AUTH_TOKEN = "your_auth_token"
+    FROM_WHATSAPP_NUMBER = "whatsapp:+14155238886"
+
+    client = Client(ACCOUNT_SID, AUTH_TOKEN)
+
+    try:
+        message = client.messages.create(
+            body=message,
+            from_=FROM_WHATSAPP_NUMBER,
+            to=f"whatsapp:+{to}"
+        )
+        print("Reply sent successfully.")
+
+    except Exception as e:
+        print("Failed to send WhatsApp message:", str(e))
