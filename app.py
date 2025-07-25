@@ -1,122 +1,89 @@
-from flask import Flask, request, send_file
-from twilio.twiml.messaging_response import MessagingResponse
-import math
-import os
+from flask import Flask, request, jsonify
+import pandas as pd
 
 app = Flask(__name__)
 
-@app.route('/')
-def home():
-    return '🚀 GoalGenieBot is live!'
+# Load the recommendation matrix
+matrix_path = 'data/recommendation_matrix.xlsx'
+df = pd.read_excel(matrix_path)
 
-# 🔍 Parse input like: goal: 10000000\n tenure: 7\n sip: 60000\n risk: aggressive
-def parse_input(message):
+# Clean up column names for safety
+df.columns = [col.strip().lower() for col in df.columns]
+
+def match_fund(sip, tenure, risk):
+    # Filter by risk profile
+    filtered = df[df['risk'].str.lower() == risk.lower()]
+    if filtered.empty:
+        return None, "No match found for this risk profile."
+
+    # Try to match based on tenure and SIP ranges
+    matched = filtered[
+        (filtered['min_sip'] <= sip) &
+        (filtered['max_sip'] >= sip) &
+        (filtered['min_tenure'] <= tenure) &
+        (filtered['max_tenure'] >= tenure)
+    ]
+
+    if matched.empty:
+        return None, "No exact match found for your SIP and tenure range."
+
+    best_match = matched.iloc[0]
+    return best_match, None
+
+@app.route("/", methods=["GET", "POST"])
+def webhook():
+    if request.method == "GET":
+        return "GoalGenieBot is live!"
+
+    incoming_msg = request.json.get("Body", "").lower()
+    sender = request.json.get("From", "")
+
+    # Check if input format is correct
     try:
-        print("🔍 Raw message:", message)
-        lines = message.strip().lower().split('\n')
-        data = {}
+        lines = incoming_msg.strip().split("\n")
+        user_data = {}
         for line in lines:
-            if ':' in line:
-                key, value = line.split(':', 1)
-                data[key.strip()] = value.strip()
-        print("✅ Parsed data:", data)
-        return int(data['goal']), int(data['tenure']), int(data['sip']), data['risk']
+            if "goal" in line:
+                user_data["goal"] = int(line.split()[-1].replace("₹", "").replace(",", ""))
+            elif "tenure" in line:
+                user_data["tenure"] = int(line.split()[0])
+            elif "sip" in line:
+                user_data["sip"] = int(line.split()[-1].replace("₹", "").replace(",", ""))
+            elif "risk" in line:
+                user_data["risk"] = line.split()[-1].lower()
+
+        goal = user_data["goal"]
+        tenure = user_data["tenure"]
+        sip = user_data["sip"]
+        risk = user_data["risk"]
+
+        # Fund matching
+        match, error = match_fund(sip, tenure, risk)
+
+        if error:
+            return jsonify({"message": f"Sorry! {error}"})
+
+        fund_name = match['fund']
+        logic = match['logic']
+        explanation = match['explanation']
+        hindi = match['hindi_explanation']
+
+        response = f"""📊 *Fund Recommendation*\n
+✅ *{fund_name}*\n
+🧠 *Logic:* {logic}\n
+📘 *Explanation:* {explanation}\n
+🗣️ *हिंदी में:* {hindi}
+        """
+
     except Exception as e:
-        print("❌ Error parsing input:", e)
-        return None
+        response = ("⚠️ Error parsing input.\n"
+                    "Please send your details like this:\n"
+                    "`goal 10000000`\n"
+                    "`tenure 7 years`\n"
+                    "`sip 60000`\n"
+                    "`risk aggressive`")
 
-def future_value(sip, r, n):
-    return sip * (((1 + r) ** n - 1) / r) * (1 + r)
+    return jsonify({"message": response})
 
-def categorize_tenure(years):
-    if years < 3:
-        return 'short'
-    elif years <= 5:
-        return 'medium'
-    else:
-        return 'long'
-
-def get_fund_mix(risk, tenure_category):
-    mix = []
-
-    if tenure_category == 'short':
-        mix = [
-            ('ICICI Liquid Fund', '40%'),
-            ('HDFC Ultra Short Term Fund', '40%'),
-            ('SBI Arbitrage Fund', '20%')
-        ]
-    elif tenure_category == 'medium':
-        if risk == 'aggressive':
-            mix = [
-                ('Axis Balanced Advantage Fund', '40%'),
-                ('Kotak MultiCap Fund', '30%'),
-                ('Mirae Asset Large Cap Fund', '30%')
-            ]
-        else:
-            mix = [
-                ('HDFC Hybrid Equity Fund', '40%'),
-                ('Kotak MultiCap Fund', '30%'),
-                ('ICICI Bluechip Fund', '30%')
-            ]
-    elif tenure_category == 'long':
-        if risk == 'aggressive':
-            mix = [
-                ('Parag Parikh Flexi Cap Fund', '40%'),
-                ('Quant Mid Cap Fund', '30%'),
-                ('Nippon Small Cap Fund', '30%')
-            ]
-        elif risk == 'moderate':
-            mix = [
-                ('SBI Large & Mid Cap Fund', '40%'),
-                ('ICICI Balanced Advantage Fund', '30%'),
-                ('Axis Midcap Fund', '30%')
-            ]
-        else:
-            mix = [
-                ('HDFC Balanced Advantage Fund', '40%'),
-                ('ICICI Equity Savings Fund', '30%'),
-                ('SBI Hybrid Debt Fund', '30%')
-            ]
-    
-    return mix
-
-@app.route('/whatsapp/webhook', methods=['POST'])
-def whatsapp_webhook():
-    incoming_msg = request.form.get('Body', '')
-    print("📩 Incoming WhatsApp Message:", incoming_msg)
-
-    resp = MessagingResponse()
-    msg = resp.message()
-
-    parsed = parse_input(incoming_msg)
-
-    if parsed:
-        goal, tenure, sip, risk = parsed
-        tenure_cat = categorize_tenure(tenure)
-        print(f"🎯 Goal: ₹{goal}, Tenure: {tenure_cat}, SIP: ₹{sip}, Risk: {risk}")
-
-        rate_map = {'aggressive': 0.012, 'moderate': 0.009, 'conservative': 0.006}
-        r = rate_map.get(risk, 0.009)
-        months = tenure * 12
-        fv = round(future_value(sip, r, months))
-        feasible = "Achievable ✅" if fv >= goal else f"Not Achievable ❌ (est. ₹{fv:,})"
-
-        funds = get_fund_mix(risk, tenure_cat)
-        fund_lines = '\n'.join([f"• {name} ({alloc})" for name, alloc in funds])
-
-        msg.body(
-            f"🎯 Goal: ₹{goal:,} in {tenure} years\n"
-            f"💸 SIP: ₹{sip:,}/month\n"
-            f"📈 Risk: {risk.capitalize()}\n"
-            f"🧮 Feasibility: {feasible}\n\n"
-            f"📊 Recommended Funds:\n{fund_lines}\n\n"
-            f"📥 PDF with Sip Wealth logo coming soon!"
-        )
-    else:
-        msg.body(
-            "👋 *This is GoalGenieBot powered by Sip Wealth*\n\n"
-            "Send your goal in this format:\n\n"
-            "*goal: 10000000*\n*tenure: 7*\n*sip: 60000*\n*risk: aggressive*"
-        )
-
-    return str(resp)
+if __name__ == "__main__":
+    app.run(debug=True)
