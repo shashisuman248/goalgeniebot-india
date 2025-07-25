@@ -30,7 +30,11 @@ def match_fund(sip, tenure, risk):
     best_match = matched.iloc[0]
     return best_match, None
 
-@app.route("/", methods=["GET", "POST"])
+@app.route("/webhook", methods=["POST"])
+@app.route("/whatsapp/webhook", methods=["POST"])
+def webhook():
+    # your code here
+
 def webhook():
     if request.method == "GET":
         return "GoalGenieBot is live!"
